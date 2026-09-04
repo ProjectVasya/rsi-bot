@@ -6,8 +6,8 @@ from threading import Thread
 from http.server import HTTPServer, BaseHTTPRequestHandler
 
 # ===== НАСТРОЙКИ =====
-TOKEN = os.getenv("8914466964:AAHuEgd_dSrSUaYzb1Vp_UVgohe-S_-Uk9w")
-CHAT_ID = os.getenv("946984734")
+TOKEN = os.getenv("TOKEN")
+CHAT_ID = os.getenv("CHAT_ID")
 RSI_THRESHOLD_1H = 85
 RSI_THRESHOLD_15M = 80
 TIMEFRAME_1H = "60"
