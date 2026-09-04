@@ -2,6 +2,8 @@ import requests
 import time
 from datetime import datetime, timedelta
 import os
+from threading import Thread
+from http.server import HTTPServer, BaseHTTPRequestHandler
 
 # ===== НАСТРОЙКИ =====
 TOKEN = os.getenv("8914466964:AAHuEgd_dSrSUaYzb1Vp_UVgohe-S_-Uk9w")
@@ -149,7 +151,25 @@ def scan_and_alert():
             print(f"❌ {sym}: {e}")
             continue
 
+# === ПРОСТОЙ ВЕБ-СЕРВЕР ДЛЯ RENDER ===
+class Handler(BaseHTTPRequestHandler):
+    def do_GET(self):
+        self.send_response(200)
+        self.end_headers()
+        self.wfile.write(b"OK")
+
+def run_webserver():
+    port = int(os.environ.get("PORT", 8000))
+    server = HTTPServer(("0.0.0.0", port), Handler)
+    server.serve_forever()
+
+# === ЗАПУСК ===
 if __name__ == "__main__":
+    # Запускаем веб-сервер в отдельном потоке
+    Thread(target=run_webserver, daemon=True).start()
+    print("🌐 Веб-сервер запущен")
+
+    # Запускаем бота
     send_telegram("✅ Бот обновлён! RSI + объём + пин-бар + поглощение на 15M")
     print("🤖 Бот запущен. Ищу монеты с RSI > 85 на 1H, RSI > 80 на 15M, пин-бар или поглощение")
     while True:
