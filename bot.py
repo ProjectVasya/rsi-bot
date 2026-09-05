@@ -8,11 +8,7 @@ from http.server import HTTPServer, BaseHTTPRequestHandler
 # ===== НАСТРОЙКИ =====
 TOKEN = os.getenv("TOKEN")
 CHAT_ID = os.getenv("CHAT_ID")
-
-# === ТЕСТОВЫЙ РЕЖИМ (RSI > 70) ===
-# Когда проверишь — поменяй на 85
-RSI_THRESHOLD = 70
-
+RSI_THRESHOLD = 70  # позже поменяешь на 85
 TIMEFRAME_1H = "60"
 TIMEFRAME_15M = "15"
 # =====================
@@ -122,11 +118,11 @@ def scan_and_alert():
             if not (pinbar or engulfing):
                 continue
 
-            # === Объём на 15M ===
+            # === Объём на 15M (только информация) ===
             avg_volume = sum(volumes_15m[-6:-1]) / 5 if len(volumes_15m) >= 6 else volumes_15m[-1]
             last_volume = volumes_15m[-1]
             volume_ratio = last_volume / avg_volume if avg_volume > 0 else 0
-            volume_status = "🔻" if volume_ratio < 0.8 else "🟡"
+            volume_status = "🔻 Падает" if volume_ratio < 0.8 else "🟡 Высокий"
 
             # === Проверяем перегрев на 1H за последние 3 часа ===
             data_1h = get_bybit_klines(sym, TIMEFRAME_1H, limit=15)
@@ -134,7 +130,7 @@ def scan_and_alert():
                 continue
 
             rsi_over_threshold = False
-            # Проверяем последние 3 свечи (3 часа)
+            max_rsi_1h = 0
             for i in range(1, 4):
                 if len(data_1h) < i:
                     continue
@@ -142,19 +138,38 @@ def scan_and_alert():
                 if len(closes_1h) < 14:
                     continue
                 rsi_1h = calculate_rsi(closes_1h)
+                if rsi_1h > max_rsi_1h:
+                    max_rsi_1h = rsi_1h
                 if rsi_1h > RSI_THRESHOLD:
                     rsi_over_threshold = True
-                    break
 
             if not rsi_over_threshold:
                 continue
 
-            # === Отправка сигнала ===
-            pin_text = "🟢 Пин-бар" if pinbar else ""
-            eng_text = "🟢 Поглощение" if engulfing else ""
-            msg = (f"{volume_status} {sym} — 15M RSI: {rsi_15m:.1f} "
-                   f"{pin_text} {eng_text} "
-                   f"(объём {'падает' if volume_ratio < 0.8 else 'высокий'}, порог RSI > {RSI_THRESHOLD})")
+            # === Цена ===
+            price = float(data_15m[-1][4])
+
+            # === Формируем уведомление ===
+            pattern = []
+            if pinbar:
+                pattern.append("🟢 Пин-бар")
+            if engulfing:
+                pattern.append("🟢 Поглощение")
+            pattern_text = " + ".join(pattern) if pattern else "—"
+
+            msg = (
+                f"🔔 **НОВЫЙ СИГНАЛ** 🔔\n"
+                f"━━━━━━━━━━━━━━━━━━\n"
+                f"🪙 **{sym}**\n"
+                f"💰 Цена: `{price:.4f}`\n"
+                f"📊 1H RSI (пик за 3ч): **{max_rsi_1h:.1f}**\n"
+                f"📉 15M RSI: **{rsi_15m:.1f}**\n"
+                f"📈 Паттерн: {pattern_text}\n"
+                f"🔊 Объём: {volume_status}\n"
+                f"━━━━━━━━━━━━━━━━━━\n"
+                f"✅ Условия выполнены. Монета готова к анализу!"
+            )
+
             print(msg)
             send_telegram(msg)
             time.sleep(1)
@@ -163,7 +178,7 @@ def scan_and_alert():
             print(f"❌ {sym}: {e}")
             continue
 
-# === ВЕБ-СЕРВЕР ДЛЯ RENDER ===
+# === ВЕБ-СЕРВЕР ===
 class Handler(BaseHTTPRequestHandler):
     def do_GET(self):
         self.send_response(200)
@@ -180,7 +195,7 @@ if __name__ == "__main__":
     Thread(target=run_webserver, daemon=True).start()
     print("🌐 Веб-сервер запущен")
 
-    send_telegram(f"✅ Бот обновлён! Ищу паттерны + RSI > {RSI_THRESHOLD} за последние 3 часа (тестовый режим)")
+    send_telegram(f"👋 **Бот запущен!**\n🔍 Ищу паттерны + RSI > {RSI_THRESHOLD} за последние 3 часа\n📊 Тестовый режим (RSI > 70)")
     print(f"🤖 Бот запущен. Ищу пин-бар/поглощение + RSI > {RSI_THRESHOLD} на 1H за последние 3 часа")
     while True:
         scan_and_alert()
