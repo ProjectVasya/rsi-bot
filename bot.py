@@ -8,8 +8,11 @@ from http.server import HTTPServer, BaseHTTPRequestHandler
 # ===== НАСТРОЙКИ =====
 TOKEN = os.getenv("TOKEN")
 CHAT_ID = os.getenv("CHAT_ID")
-RSI_THRESHOLD_1H = 85
-RSI_THRESHOLD_15M = 80
+
+# === ТЕСТОВЫЙ РЕЖИМ (RSI > 70) ===
+# Когда проверишь — поменяй на 85
+RSI_THRESHOLD = 70
+
 TIMEFRAME_1H = "60"
 TIMEFRAME_15M = "15"
 # =====================
@@ -104,20 +107,7 @@ def scan_and_alert():
     now = datetime.now()
     for sym in symbols:
         try:
-            data_1h = get_bybit_klines(sym, TIMEFRAME_1H)
-            if not data_1h or len(data_1h) < 15:
-                continue
-
-            last_candle_time = datetime.fromtimestamp(int(data_1h[-1][0]) / 1000)
-            if now - last_candle_time > timedelta(hours=1):
-                continue
-
-            closes_1h = [float(x[4]) for x in data_1h]
-            rsi_1h = calculate_rsi(closes_1h)
-
-            if rsi_1h < RSI_THRESHOLD_1H:
-                continue
-
+            # === 15M — ищем пин-бар или поглощение ===
             data_15m = get_bybit_klines(sym, TIMEFRAME_15M, limit=20)
             if not data_15m or len(data_15m) < 15:
                 continue
@@ -126,32 +116,54 @@ def scan_and_alert():
             volumes_15m = [float(x[5]) for x in data_15m]
             rsi_15m = calculate_rsi(closes_15m)
 
-            if rsi_15m < RSI_THRESHOLD_15M:
+            pinbar = check_pin_bar(data_15m[-1])
+            engulfing = check_engulfing(data_15m)
+
+            if not (pinbar or engulfing):
                 continue
 
+            # === Объём на 15M ===
             avg_volume = sum(volumes_15m[-6:-1]) / 5 if len(volumes_15m) >= 6 else volumes_15m[-1]
             last_volume = volumes_15m[-1]
             volume_ratio = last_volume / avg_volume if avg_volume > 0 else 0
             volume_status = "🔻" if volume_ratio < 0.8 else "🟡"
 
-            pinbar = check_pin_bar(data_15m[-1])
-            engulfing = check_engulfing(data_15m)
+            # === Проверяем перегрев на 1H за последние 3 часа ===
+            data_1h = get_bybit_klines(sym, TIMEFRAME_1H, limit=15)
+            if not data_1h or len(data_1h) < 15:
+                continue
 
-            if pinbar or engulfing:
-                pin_text = "🟢 Пин-бар" if pinbar else ""
-                eng_text = "🟢 Поглощение" if engulfing else ""
-                msg = (f"{volume_status} {sym} — 1H RSI: {rsi_1h:.1f} | 15M RSI: {rsi_15m:.1f} "
-                       f"{pin_text} {eng_text} "
-                       f"(объём {'падает' if volume_ratio < 0.8 else 'высокий'}, свеча {last_candle_time.strftime('%H:%M')})")
-                print(msg)
-                send_telegram(msg)
-                time.sleep(1)
+            rsi_over_threshold = False
+            # Проверяем последние 3 свечи (3 часа)
+            for i in range(1, 4):
+                if len(data_1h) < i:
+                    continue
+                closes_1h = [float(x[4]) for x in data_1h[:-i]] if i > 0 else [float(x[4]) for x in data_1h]
+                if len(closes_1h) < 14:
+                    continue
+                rsi_1h = calculate_rsi(closes_1h)
+                if rsi_1h > RSI_THRESHOLD:
+                    rsi_over_threshold = True
+                    break
+
+            if not rsi_over_threshold:
+                continue
+
+            # === Отправка сигнала ===
+            pin_text = "🟢 Пин-бар" if pinbar else ""
+            eng_text = "🟢 Поглощение" if engulfing else ""
+            msg = (f"{volume_status} {sym} — 15M RSI: {rsi_15m:.1f} "
+                   f"{pin_text} {eng_text} "
+                   f"(объём {'падает' if volume_ratio < 0.8 else 'высокий'}, порог RSI > {RSI_THRESHOLD})")
+            print(msg)
+            send_telegram(msg)
+            time.sleep(1)
 
         except Exception as e:
             print(f"❌ {sym}: {e}")
             continue
 
-# === ПРОСТОЙ ВЕБ-СЕРВЕР ДЛЯ RENDER ===
+# === ВЕБ-СЕРВЕР ДЛЯ RENDER ===
 class Handler(BaseHTTPRequestHandler):
     def do_GET(self):
         self.send_response(200)
@@ -165,13 +177,11 @@ def run_webserver():
 
 # === ЗАПУСК ===
 if __name__ == "__main__":
-    # Запускаем веб-сервер в отдельном потоке
     Thread(target=run_webserver, daemon=True).start()
     print("🌐 Веб-сервер запущен")
 
-    # Запускаем бота
-    send_telegram("✅ Бот обновлён! RSI + объём + пин-бар + поглощение на 15M")
-    print("🤖 Бот запущен. Ищу монеты с RSI > 85 на 1H, RSI > 80 на 15M, пин-бар или поглощение")
+    send_telegram(f"✅ Бот обновлён! Ищу паттерны + RSI > {RSI_THRESHOLD} за последние 3 часа (тестовый режим)")
+    print(f"🤖 Бот запущен. Ищу пин-бар/поглощение + RSI > {RSI_THRESHOLD} на 1H за последние 3 часа")
     while True:
         scan_and_alert()
         print("⏳ Пауза 5 минут...")
