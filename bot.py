@@ -11,6 +11,7 @@ CHAT_ID = os.getenv("CHAT_ID")
 
 RSI_THRESHOLD = 60          # тестовый порог
 HOURS_BACK = 5              # проверяем за последние 5 часов
+CANDLES_BACK = 4            # ищем паттерн на последних 4 свечах (15M)
 
 TIMEFRAME_1H = "60"
 TIMEFRAME_15M = "15"
@@ -106,7 +107,7 @@ def scan_and_alert():
     now = datetime.now()
     for sym in symbols:
         try:
-            # === 15M — ищем пин-бар или поглощение ===
+            # === 15M — ищем пин-бар или поглощение на последних CANDLES_BACK свечах ===
             data_15m = get_bybit_klines(sym, TIMEFRAME_15M, limit=20)
             if not data_15m or len(data_15m) < 15:
                 continue
@@ -115,10 +116,21 @@ def scan_and_alert():
             volumes_15m = [float(x[5]) for x in data_15m]
             rsi_15m = calculate_rsi(closes_15m)
 
-            pinbar = check_pin_bar(data_15m[-1])
-            engulfing = check_engulfing(data_15m)
+            pinbar_found = False
+            engulfing_found = False
+            pattern_time = None
 
-            if not (pinbar or engulfing):
+            for i in range(1, CANDLES_BACK + 1):
+                if check_pin_bar(data_15m[-i]):
+                    pinbar_found = True
+                    pattern_time = datetime.fromtimestamp(int(data_15m[-i][0]) / 1000).strftime('%H:%M')
+                    break
+                if check_engulfing(data_15m[-i-1:-i+1] if i > 1 else data_15m[-2:]):
+                    engulfing_found = True
+                    pattern_time = datetime.fromtimestamp(int(data_15m[-i][0]) / 1000).strftime('%H:%M')
+                    break
+
+            if not (pinbar_found or engulfing_found):
                 continue
 
             # === Объём на 15M ===
@@ -154,9 +166,9 @@ def scan_and_alert():
 
             # === Формируем уведомление ===
             pattern = []
-            if pinbar:
+            if pinbar_found:
                 pattern.append("🟢 Пин-бар")
-            if engulfing:
+            if engulfing_found:
                 pattern.append("🟢 Поглощение")
             pattern_text = " + ".join(pattern) if pattern else "—"
 
@@ -167,7 +179,7 @@ def scan_and_alert():
                 f"💰 Цена: `{price:.4f}`\n"
                 f"📊 1H RSI (пик за {HOURS_BACK}ч): **{max_rsi_1h:.1f}**\n"
                 f"📉 15M RSI: **{rsi_15m:.1f}**\n"
-                f"📈 Паттерн: {pattern_text}\n"
+                f"📈 Паттерн: {pattern_text} (на свече {pattern_time})\n"
                 f"🔊 Объём: {volume_status}\n"
                 f"━━━━━━━━━━━━━━━━━━\n"
                 f"✅ Тестовый режим (RSI > {RSI_THRESHOLD})"
@@ -202,8 +214,8 @@ if __name__ == "__main__":
     Thread(target=run_webserver, daemon=True).start()
     print("🌐 Веб-сервер запущен")
 
-    send_telegram(f"👋 **Тестовый режим**\n🔍 Ищу паттерны + RSI > {RSI_THRESHOLD} за последние {HOURS_BACK} часов\n📊 Ожидаю много сигналов для проверки")
-    print(f"🤖 Бот запущен. Тестовый режим: RSI > {RSI_THRESHOLD}, окно {HOURS_BACK} часов")
+    send_telegram(f"👋 **Тестовый режим**\n🔍 Ищу паттерны на последних {CANDLES_BACK} свечах (15M)\n📊 RSI > {RSI_THRESHOLD} за последние {HOURS_BACK} часов")
+    print(f"🤖 Бот запущен. Поиск на {CANDLES_BACK} свечах, RSI > {RSI_THRESHOLD}, окно {HOURS_BACK} часов")
     while True:
         scan_and_alert()
         print("⏳ Пауза 5 минут...")
