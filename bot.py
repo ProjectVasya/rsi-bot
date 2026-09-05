@@ -5,13 +5,16 @@ import os
 from threading import Thread
 from http.server import HTTPServer, BaseHTTPRequestHandler
 
-# ===== НАСТРОЙКИ =====
+# ===== НАСТРОЙКИ (ТЕСТОВЫЙ РЕЖИМ) =====
 TOKEN = os.getenv("TOKEN")
 CHAT_ID = os.getenv("CHAT_ID")
-RSI_THRESHOLD = 70  # позже поменяешь на 85
+
+RSI_THRESHOLD = 60          # тестовый порог
+HOURS_BACK = 5              # проверяем за последние 5 часов
+
 TIMEFRAME_1H = "60"
 TIMEFRAME_15M = "15"
-# =====================
+# =======================================
 
 def send_telegram(text):
     if not TOKEN or not CHAT_ID:
@@ -118,20 +121,20 @@ def scan_and_alert():
             if not (pinbar or engulfing):
                 continue
 
-            # === Объём на 15M (только информация) ===
+            # === Объём на 15M ===
             avg_volume = sum(volumes_15m[-6:-1]) / 5 if len(volumes_15m) >= 6 else volumes_15m[-1]
             last_volume = volumes_15m[-1]
             volume_ratio = last_volume / avg_volume if avg_volume > 0 else 0
             volume_status = "🔻 Падает" if volume_ratio < 0.8 else "🟡 Высокий"
 
-            # === Проверяем перегрев на 1H за последние 3 часа ===
-            data_1h = get_bybit_klines(sym, TIMEFRAME_1H, limit=15)
-            if not data_1h or len(data_1h) < 15:
+            # === Проверяем перегрев на 1H за последние HOURS_BACK часов ===
+            data_1h = get_bybit_klines(sym, TIMEFRAME_1H, limit=15 + HOURS_BACK)
+            if not data_1h or len(data_1h) < 14:
                 continue
 
             rsi_over_threshold = False
             max_rsi_1h = 0
-            for i in range(1, 4):
+            for i in range(1, HOURS_BACK + 1):
                 if len(data_1h) < i:
                     continue
                 closes_1h = [float(x[4]) for x in data_1h[:-i]] if i > 0 else [float(x[4]) for x in data_1h]
@@ -162,12 +165,12 @@ def scan_and_alert():
                 f"━━━━━━━━━━━━━━━━━━\n"
                 f"🪙 **{sym}**\n"
                 f"💰 Цена: `{price:.4f}`\n"
-                f"📊 1H RSI (пик за 3ч): **{max_rsi_1h:.1f}**\n"
+                f"📊 1H RSI (пик за {HOURS_BACK}ч): **{max_rsi_1h:.1f}**\n"
                 f"📉 15M RSI: **{rsi_15m:.1f}**\n"
                 f"📈 Паттерн: {pattern_text}\n"
                 f"🔊 Объём: {volume_status}\n"
                 f"━━━━━━━━━━━━━━━━━━\n"
-                f"✅ Условия выполнены. Монета готова к анализу!"
+                f"✅ Тестовый режим (RSI > {RSI_THRESHOLD})"
             )
 
             print(msg)
@@ -185,6 +188,10 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(b"OK")
 
+    def do_HEAD(self):
+        self.send_response(200)
+        self.end_headers()
+
 def run_webserver():
     port = int(os.environ.get("PORT", 8000))
     server = HTTPServer(("0.0.0.0", port), Handler)
@@ -195,8 +202,8 @@ if __name__ == "__main__":
     Thread(target=run_webserver, daemon=True).start()
     print("🌐 Веб-сервер запущен")
 
-    send_telegram(f"👋 **Бот запущен!**\n🔍 Ищу паттерны + RSI > {RSI_THRESHOLD} за последние 3 часа\n📊 Тестовый режим (RSI > 70)")
-    print(f"🤖 Бот запущен. Ищу пин-бар/поглощение + RSI > {RSI_THRESHOLD} на 1H за последние 3 часа")
+    send_telegram(f"👋 **Тестовый режим**\n🔍 Ищу паттерны + RSI > {RSI_THRESHOLD} за последние {HOURS_BACK} часов\n📊 Ожидаю много сигналов для проверки")
+    print(f"🤖 Бот запущен. Тестовый режим: RSI > {RSI_THRESHOLD}, окно {HOURS_BACK} часов")
     while True:
         scan_and_alert()
         print("⏳ Пауза 5 минут...")
