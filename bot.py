@@ -14,6 +14,10 @@ CANDLES_BACK = 4
 TIMEFRAME_1H = "60"
 TIMEFRAME_15M = "15"
 
+HEADERS = {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+}
+
 def send_telegram(text):
     if not TOKEN or not CHAT_ID:
         print("❌ Нет TOKEN или CHAT_ID")
@@ -21,7 +25,9 @@ def send_telegram(text):
     try:
         requests.post(
             f"https://api.telegram.org/bot{TOKEN}/sendMessage",
-            json={"chat_id": CHAT_ID, "text": text}
+            json={"chat_id": CHAT_ID, "text": text},
+            headers=HEADERS,
+            timeout=10
         )
     except Exception as e:
         print(f"Ошибка отправки: {e}")
@@ -29,7 +35,7 @@ def send_telegram(text):
 def get_bybit_klines(symbol, interval, limit=30):
     url = f"https://api.bybit.com/v5/market/kline?category=linear&symbol={symbol}&interval={interval}&limit={limit}"
     try:
-        r = requests.get(url, timeout=10)
+        r = requests.get(url, headers=HEADERS, timeout=10)
         if r.status_code != 200:
             return None
         data = r.json()
@@ -88,7 +94,7 @@ def check_engulfing(candles):
 def get_all_usdt_symbols():
     url = "https://api.bybit.com/v5/market/tickers?category=linear"
     try:
-        r = requests.get(url, timeout=10)
+        r = requests.get(url, headers=HEADERS, timeout=10)
         if r.status_code != 200:
             return []
         data = r.json()
@@ -111,13 +117,12 @@ def scan_and_alert():
 
     now = datetime.now()
     checked = 0
-    for sym in symbols[:50]:  # ограничим 50 монетами для теста
+    for sym in symbols[:50]:
         try:
             checked += 1
             if checked % 10 == 0:
                 print(f"⏳ Проверено {checked} монет")
 
-            # === 15M данные ===
             data_15m = get_bybit_klines(sym, TIMEFRAME_15M, limit=20)
             if not data_15m or len(data_15m) < 15:
                 continue
@@ -126,7 +131,6 @@ def scan_and_alert():
             volumes_15m = [float(x[5]) for x in data_15m]
             rsi_15m = calculate_rsi(closes_15m)
 
-            # === Ищем паттерн ===
             pinbar_found = False
             engulfing_found = False
             for i in range(1, CANDLES_BACK + 1):
@@ -140,7 +144,6 @@ def scan_and_alert():
             if not (pinbar_found or engulfing_found):
                 continue
 
-            # === Проверка RSI за 5 часов ===
             data_1h = get_bybit_klines(sym, TIMEFRAME_1H, limit=15 + HOURS_BACK)
             if not data_1h or len(data_1h) < 14:
                 continue
@@ -160,7 +163,6 @@ def scan_and_alert():
             if not rsi_over_threshold:
                 continue
 
-            # === Отправка сигнала ===
             pattern = []
             if pinbar_found:
                 pattern.append("🟢 Пин-бар")
