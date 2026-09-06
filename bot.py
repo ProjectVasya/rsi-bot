@@ -106,6 +106,20 @@ def get_all_usdt_symbols():
         return []
 
 def scan_and_alert():
+    # === ТЕСТ ПОДКЛЮЧЕНИЯ К BYBIT ===
+    test_url = "https://api.bybit.com/v5/market/tickers?category=linear"
+    try:
+        r = requests.get(test_url, headers=HEADERS, timeout=10)
+        send_telegram(f"🔍 Тест API Bybit: статус {r.status_code}")
+        print(f"🔍 Тест API: статус {r.status_code}")
+        if r.status_code != 200:
+            send_telegram("❌ Bybit вернул не 200")
+            return
+    except Exception as e:
+        send_telegram(f"❌ Ошибка подключения к Bybit: {e}")
+        print(f"❌ Ошибка подключения: {e}")
+        return
+
     symbols = get_all_usdt_symbols()
     if not symbols:
         send_telegram("⚠️ Не удалось получить список монет")
